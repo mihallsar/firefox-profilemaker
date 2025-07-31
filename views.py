@@ -192,3 +192,110 @@ def download(request, what):
         response['Content-Disposition'] = 'attachment; filename="' + zipfilename + '"'
 
     return response
+
+
+# OpenRouter AI интеграция
+from .openrouter_service import get_openrouter_service
+from django.http import JsonResponse, StreamingHttpResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+import json
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def openrouter_models(request):
+    """Получить список доступных моделей OpenRouter"""
+    try:
+        service = get_openrouter_service()
+        models = service.get_available_models()
+        return JsonResponse(models)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def openrouter_chat(request):
+    """Чат с AI через OpenRouter"""
+    try:
+        data = json.loads(request.body)
+        prompt = data.get('prompt', '')
+        model = data.get('model', 'openai/gpt-3.5-turbo')
+        system_message = data.get('system_message', None)
+        
+        if not prompt:
+            return JsonResponse({"error": "Промпт не может быть пустым"}, status=400)
+        
+        service = get_openrouter_service()
+        result = service.simple_chat(prompt, model, system_message)
+        
+        return JsonResponse(result)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Неверный формат JSON"}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def openrouter_chat_advanced(request):
+    """Продвинутый чат с поддержкой истории сообщений"""
+    try:
+        data = json.loads(request.body)
+        messages = data.get('messages', [])
+        model = data.get('model', 'openai/gpt-3.5-turbo')
+        
+        if not messages:
+            return JsonResponse({"error": "Сообщения не могут быть пустыми"}, status=400)
+        
+        service = get_openrouter_service()
+        result = service.chat_completion(messages, model)
+        
+        return JsonResponse(result)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Неверный формат JSON"}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def openrouter_chat_stream_generator(messages, model):
+    """Генератор для стримингового ответа"""
+    try:
+        service = get_openrouter_service()
+        for chunk in service.stream_chat(messages, model):
+            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+        yield f"data: {json.dumps({'done': True})}\n\n"
+    except Exception as e:
+        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def openrouter_chat_stream(request):
+    """Стриминговый чат с AI"""
+    try:
+        data = json.loads(request.body)
+        messages = data.get('messages', [])
+        model = data.get('model', 'openai/gpt-3.5-turbo')
+        
+        if not messages:
+            return JsonResponse({"error": "Сообщения не могут быть пустыми"}, status=400)
+        
+        response = StreamingHttpResponse(
+            openrouter_chat_stream_generator(messages, model),
+            content_type='text/event-stream'
+        )
+        response['Cache-Control'] = 'no-cache'
+        response['Connection'] = 'keep-alive'
+        return response
+        
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Неверный формат JSON"}, status=400)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def openrouter_interface(request):
+    """Интерфейс для работы с OpenRouter AI"""
+    return render(request, 'openrouter_interface.html')
